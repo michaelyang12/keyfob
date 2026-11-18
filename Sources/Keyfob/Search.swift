@@ -104,6 +104,7 @@ final class SearchModel {
     @ObservationIgnored var onEdit: (Token) -> Void = { _ in }
     @ObservationIgnored var onSettings: () -> Void = {}
     @ObservationIgnored var onManage: () -> Void = {}
+    @ObservationIgnored var onHeightChange: (CGFloat) -> Void = { _ in }
 
     let store: TokenStore
     let lock: SessionLock

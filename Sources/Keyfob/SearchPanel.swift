@@ -15,12 +15,12 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
     private var lastHidden = Date.distantPast
     var suppressAutoHide = false
 
-    private let size = NSSize(width: 640, height: 420)
+    private let width: CGFloat = 480
 
     init(model: SearchModel) {
         self.model = model
         panel = KeyPanel(
-            contentRect: NSRect(origin: .zero, size: size),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
             styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
             backing: .buffered,
             defer: true
@@ -42,7 +42,7 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         effect.blendingMode = .behindWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 14
+        effect.layer?.cornerRadius = 12
         effect.layer?.cornerCurve = .continuous
         effect.layer?.masksToBounds = true
         effect.layer?.borderWidth = 0.5
@@ -50,6 +50,7 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
 
         let hosting = NSHostingView(rootView: SearchView(model: model))
         hosting.translatesAutoresizingMaskIntoConstraints = false
+        hosting.sizingOptions = []
         effect.addSubview(hosting)
         NSLayoutConstraint.activate([
             hosting.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
@@ -58,14 +59,17 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
             hosting.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
         ])
         panel.contentView = effect
+        model.onHeightChange = { [weak self] height in
+            Task { @MainActor in self?.resize(to: height) }
+        }
     }
 
     var isVisible: Bool { panel.isVisible }
     var canReopen: Bool { Date().timeIntervalSince(lastHidden) > 0.3 }
 
     func show(anchor: NSRect?) {
-        panel.setFrame(frame(anchor: anchor), display: false)
         model.prepareForPresent()
+        panel.setFrame(frame(anchor: anchor, height: SearchView.height(for: model.results.count)), display: false)
         panel.makeKeyAndOrderFront(nil)
         installMonitor()
     }
@@ -81,25 +85,28 @@ final class SearchPanelController: NSObject, NSWindowDelegate {
         if panel.isVisible { panel.makeKey() }
     }
 
+    private func resize(to height: CGFloat) {
+        var frame = panel.frame
+        guard frame.height != height else { return }
+        frame.origin.y += frame.height - height
+        frame.size.height = height
+        panel.setFrame(frame, display: true)
+    }
+
     func windowDidResignKey(_ notification: Notification) {
         if !suppressAutoHide { hide() }
     }
 
-    private func frame(anchor: NSRect?) -> NSRect {
+    private func frame(anchor: NSRect?, height: CGFloat) -> NSRect {
         let screen = anchor.flatMap { a in NSScreen.screens.first { $0.frame.contains(a.origin) } }
             ?? NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) }
             ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
-        var origin: NSPoint
-        if let anchor {
-            origin = NSPoint(x: anchor.midX - size.width / 2, y: anchor.minY - size.height - 6)
-        } else {
-            origin = NSPoint(x: visible.midX - size.width / 2, y: visible.maxY - visible.height * 0.2 - size.height)
-        }
-        origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - size.width - 8)
-        origin.y = max(origin.y, visible.minY + 8)
-        return NSRect(origin: origin, size: size)
+        let top = anchor.map { $0.minY - 6 } ?? visible.maxY - visible.height * 0.2
+        let midX = anchor?.midX ?? visible.midX
+        let x = min(max(midX - width / 2, visible.minX + 8), visible.maxX - width - 8)
+        return NSRect(x: x, y: max(top - height, visible.minY + 8), width: width, height: height)
     }
 
     private func installMonitor() {
@@ -168,6 +175,19 @@ struct SearchView: View {
     @Bindable var model: SearchModel
     @FocusState private var focused: Bool
 
+    static let headerHeight: CGFloat = 44
+    static let footerHeight: CGFloat = 26
+    static let rowHeight: CGFloat = 38
+    static let maxVisibleRows = 6
+    static let emptyHeight: CGFloat = 92
+
+    static func height(for count: Int) -> CGFloat {
+        let body = count == 0
+            ? emptyHeight
+            : CGFloat(min(count, maxVisibleRows)) * (rowHeight + 2) + 8
+        return headerHeight + body + footerHeight + 2
+    }
+
     var body: some View {
         let results = model.results
         VStack(spacing: 0) {
@@ -182,32 +202,46 @@ struct SearchView: View {
         }
         .onAppear { focused = true }
         .onChange(of: model.presentCount) { focused = true }
+        .onChange(of: results.count) { _, count in model.onHeightChange(Self.height(for: count)) }
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField("Search tokens", text: $model.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 21))
+                .font(.system(size: 16))
                 .focused($focused)
             if model.lock.isEnabled {
                 Button {
                     if model.lock.isUnlocked { model.lock.lock() }
                 } label: {
                     Image(systemName: model.lock.isUnlocked ? "lock.open.fill" : "lock.fill")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(model.lock.isUnlocked ? AnyShapeStyle(.orange) : AnyShapeStyle(.tertiary))
-                        .frame(width: 22, height: 22)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(model.lock.isUnlocked ? "Unlocked. Click or press ⌘L to lock." : "Locked. Touch ID is required to copy.")
             }
+            Button {
+                model.onNew(model.query.trimmingCharacters(in: .whitespaces))
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("New token (⌘N)")
         }
-        .padding(.horizontal, 18)
-        .frame(height: 56)
+        .padding(.horizontal, 14)
+        .frame(height: Self.headerHeight)
     }
 
     private func list(_ results: [Token]) -> some View {
@@ -223,8 +257,9 @@ struct SearchView: View {
                             }
                     }
                 }
-                .padding(6)
+                .padding(4)
             }
+            .scrollIndicators(results.count > Self.maxVisibleRows ? .automatic : .never)
             .onChange(of: model.selection) { _, index in
                 if results.indices.contains(index) { proxy.scrollTo(results[index].id) }
             }
@@ -232,44 +267,39 @@ struct SearchView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 3) {
             if let error = model.store.loadError {
-                Image(systemName: "exclamationmark.triangle").font(.system(size: 26)).foregroundStyle(.orange)
-                Text("Couldn't read the keychain").font(.headline)
-                Text(error).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text("Couldn't read the keychain").font(.system(size: 13, weight: .semibold))
+                Text(error).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.center)
             } else if model.store.tokens.isEmpty {
-                Image(systemName: "key.horizontal").font(.system(size: 26)).foregroundStyle(.tertiary)
-                Text("No tokens yet").font(.headline)
-                Text("Press ↩ to add your first one").foregroundStyle(.secondary)
+                Text("No tokens yet").font(.system(size: 13, weight: .semibold))
+                Text("Click + or press ↩ to add one").foregroundStyle(.secondary)
             } else {
-                Image(systemName: "magnifyingglass").font(.system(size: 26)).foregroundStyle(.tertiary)
-                Text("No match for “\(model.query)”").font(.headline)
-                Text("Press ↩ to add it as a new token").foregroundStyle(.secondary)
+                Text("No match for “\(model.query)”").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text("Press ↩ or + to add it").foregroundStyle(.secondary)
             }
         }
-        .font(.callout)
-        .padding(24)
+        .font(.system(size: 12))
+        .padding(.horizontal, 20)
     }
 
     private func footer(count: Int) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             if let message = model.message {
                 Label(message, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
             } else {
                 KeyHint("↩", "Copy")
                 KeyHint("⇧↩", "export")
-                KeyHint("⌥↩", ".env")
                 KeyHint("⌘E", "Edit")
-                KeyHint("⌘N", "New")
             }
             Spacer()
             Text("\(count) of \(model.store.tokens.count)")
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
         }
-        .font(.system(size: 11))
-        .padding(.horizontal, 14)
-        .frame(height: 32)
+        .font(.system(size: 10.5))
+        .padding(.horizontal, 12)
+        .frame(height: Self.footerHeight)
     }
 }
 
@@ -279,34 +309,34 @@ struct TokenRow: View {
     let selected: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Monogram(name: token.name, size: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+        HStack(spacing: 10) {
+            Monogram(name: token.name, size: 22)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 5) {
                     Text(token.name)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                     ExpiryBadge(expiry: token.expiry())
                 }
                 Text(token.variableName)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 8)
-            ForEach(token.tags.prefix(3), id: \.self) { TagChip(tag: $0) }
+            Spacer(minLength: 6)
+            ForEach(token.tags.prefix(2), id: \.self) { TagChip(tag: $0) }
             if let usage {
                 Text(usage.lastUsed, format: .relative(presentation: .named))
-                    .font(.system(size: 11))
+                    .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
-                    .frame(minWidth: 70, alignment: .trailing)
+                    .lineLimit(1)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 48)
+        .padding(.horizontal, 8)
+        .frame(height: SearchView.rowHeight)
         .background {
             if selected {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(Color.accentColor.opacity(0.22))
             }
         }
