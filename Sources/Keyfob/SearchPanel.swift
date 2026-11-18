@@ -150,15 +150,15 @@ struct SearchView: View {
     @Bindable var model: SearchModel
     @FocusState private var focused: Bool
 
-    static let margin: CGFloat = 18
-    static let barHeight: CGFloat = 50
-    static let gap: CGFloat = 10
-    static let rowHeight: CGFloat = 42
-    static let headerHeight: CGFloat = 30
-    static let listInset: CGFloat = 6
-    static let emptyHeight: CGFloat = 76
+    static let margin: CGFloat = 12
+    static let barHeight: CGFloat = 38
+    static let gap: CGFloat = 8
+    static let rowHeight: CGFloat = 34
+    static let headerHeight: CGFloat = 24
+    static let listInset: CGFloat = 5
+    static let emptyHeight: CGFloat = 58
     static let maxVisibleRows = 6
-    static let contentWidth: CGFloat = 540
+    static let contentWidth: CGFloat = 400
     static var windowWidth: CGFloat { contentWidth + margin * 2 }
 
     static func height(for count: Int) -> CGFloat {
@@ -187,31 +187,31 @@ struct SearchView: View {
     }
 
     private var searchBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField("Search Tokens", text: $model.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 20))
+                .font(.system(size: 15))
                 .focused($focused)
             if model.lock.isEnabled {
                 Button {
                     if model.lock.isUnlocked { model.lock.lock() }
                 } label: {
                     Image(systemName: model.lock.isUnlocked ? "lock.open.fill" : "lock.fill")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.tertiary)
                         .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 24, height: 24)
+                        .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(model.lock.isUnlocked ? "Unlocked — click to lock" : "Locked — Touch ID is required to copy")
             }
         }
-        .padding(.leading, 18)
-        .padding(.trailing, 12)
+        .padding(.leading, 13)
+        .padding(.trailing, 8)
         .frame(height: Self.barHeight)
         .glassEffect(.regular, in: .capsule)
     }
@@ -221,7 +221,7 @@ struct SearchView: View {
             model.onNew(model.query.trimmingCharacters(in: .whitespaces))
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .frame(width: Self.barHeight, height: Self.barHeight)
                 .contentShape(Circle())
         }
@@ -240,7 +240,7 @@ struct SearchView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24, style: .continuous))
+        .glassEffect(.regular, in: .rect(cornerRadius: 18, style: .continuous))
     }
 
     private var sectionHeader: some View {
@@ -253,9 +253,9 @@ struct SearchView: View {
             }
             Spacer()
         }
-        .font(.system(size: 11, weight: .semibold))
-        .padding(.horizontal, 18)
-        .padding(.bottom, 4)
+        .font(.system(size: 10, weight: .semibold))
+        .padding(.horizontal, 14)
+        .padding(.bottom, 3)
         .frame(height: Self.headerHeight, alignment: .bottom)
     }
 
@@ -290,18 +290,18 @@ struct SearchView: View {
     private var emptyState: some View {
         VStack(spacing: 3) {
             if let error = model.store.loadError {
-                Text("Couldn't Read Keychain").font(.system(size: 13, weight: .semibold))
+                Text("Couldn't Read Keychain").font(.system(size: 12, weight: .semibold))
                 Text(error).foregroundStyle(.secondary).lineLimit(1)
             } else if model.store.tokens.isEmpty {
-                Text("No Tokens").font(.system(size: 13, weight: .semibold))
-                Text("Press Return or click + to add your first token.").foregroundStyle(.secondary)
+                Text("No Tokens").font(.system(size: 12, weight: .semibold))
+                Text("Press Return or click + to add one.").foregroundStyle(.secondary)
             } else {
-                Text("No Results for “\(model.query)”").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text("No Results for “\(model.query)”").font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Text("Press Return to add it as a new token.").foregroundStyle(.secondary)
             }
         }
-        .font(.system(size: 11))
-        .padding(.horizontal, 24)
+        .font(.system(size: 10.5))
+        .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -312,14 +312,14 @@ struct TokenRow: View {
 
     var body: some View {
         let expiry = token.expiry()
-        HStack(spacing: 11) {
-            Monogram(name: token.name, size: 28)
-            VStack(alignment: .leading, spacing: 1) {
+        HStack(spacing: 9) {
+            Monogram(name: token.name, size: 22)
+            VStack(alignment: .leading, spacing: 0) {
                 Text(token.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
-                HStack(spacing: 4) {
-                    Text(token.variableName).font(.system(size: 11, design: .monospaced))
+                HStack(spacing: 3) {
+                    Text(token.variableName).font(.system(size: 10, design: .monospaced))
                     if !token.tags.isEmpty {
                         Text("·")
                         Text(token.tags.joined(separator: ", "))
@@ -329,26 +329,23 @@ struct TokenRow: View {
                         Text(label).foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(expiry.tint))
                     }
                 }
-                .font(.system(size: 11))
+                .font(.system(size: 10))
                 .foregroundStyle(selected ? AnyShapeStyle(.white.opacity(0.8)) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
             }
             Spacer(minLength: 8)
             if selected {
-                HStack(spacing: 4) {
-                    Text("Copy")
-                    Image(systemName: "return")
-                }
-                .font(.system(size: 11, weight: .medium))
+                Image(systemName: "return")
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
             }
         }
         .foregroundStyle(selected ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 7)
         .frame(height: SearchView.rowHeight)
         .background {
             if selected {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.accentColor)
             }
         }
@@ -367,7 +364,7 @@ final class CopyHUD {
     private let panel: NSPanel
     private let model = HUDModel()
     private var hideTask: Task<Void, Never>?
-    private let size = NSSize(width: 360, height: 96)
+    private let size = NSSize(width: 300, height: 76)
 
     init() {
         panel = NSPanel(
@@ -418,18 +415,18 @@ struct HUDView: View {
     let model: HUDModel
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 22))
+                .font(.system(size: 17))
                 .foregroundStyle(.white, .green)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.title).font(.system(size: 13, weight: .semibold))
-                Text(model.subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(model.title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Text(model.subtitle).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 22)
-        .padding(.vertical, 12)
+        .padding(.leading, 12)
+        .padding(.trailing, 16)
+        .padding(.vertical, 8)
         .glassEffect(.regular, in: .capsule)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -30,6 +30,8 @@ final class ManagerModel {
                 && (!isNew || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
 
+        static var blank: Draft { Draft(token: Token(), isNew: true) }
+
         func materialized() -> Token {
             var t = token
             t.tags = tagsText
@@ -42,9 +44,9 @@ final class ManagerModel {
     }
 
     struct ImportSession {
-        var source: String
-        var entries: [DotEnv.Entry]
-        var tag: String
+        var source = ""
+        var entries: [DotEnv.Entry] = []
+        var tag = ""
     }
 
     var category: Category? = .all
@@ -53,11 +55,13 @@ final class ManagerModel {
     }
     var search = ""
     var isEditing = false
-    var editDraft: Draft?
-    var newDraft: Draft?
+    var editDraft = Draft.blank
+    var isCreating = false
+    var newDraft = Draft.blank
     var revealed: String?
     var pendingDelete: Token?
-    var importSession: ImportSession?
+    var isImporting = false
+    var importSession = ImportSession()
     var error: String?
 
     @ObservationIgnored var onCopy: (Token, CopyFormat) -> Void = { _, _ in }
@@ -117,19 +121,19 @@ final class ManagerModel {
 
     private func resetDetail() {
         isEditing = false
-        editDraft = nil
         revealed = nil
     }
 
     func newToken(name: String = "") {
         newDraft = Draft(token: Token(name: name), isNew: true)
+        isCreating = true
     }
 
     func saveNew() {
-        guard let draft = newDraft, draft.canSave else { return }
+        guard isCreating, newDraft.canSave else { return }
         do {
-            let saved = try store.save(draft.materialized(), value: draft.value)
-            newDraft = nil
+            let saved = try store.save(newDraft.materialized(), value: newDraft.value)
+            isCreating = false
             select(saved.id)
         } catch {
             self.error = error.localizedDescription
@@ -144,13 +148,12 @@ final class ManagerModel {
 
     func cancelEditing() {
         isEditing = false
-        editDraft = nil
     }
 
     func commitEditing() {
-        guard let draft = editDraft, draft.canSave else { return }
+        guard isEditing, editDraft.canSave else { return }
         do {
-            try store.save(draft.materialized(), value: draft.value)
+            try store.save(editDraft.materialized(), value: editDraft.value)
             revealed = nil
             cancelEditing()
         } catch {
@@ -214,13 +217,15 @@ final class ManagerModel {
                 entries: entries,
                 tag: url.deletingLastPathComponent().lastPathComponent.lowercased()
             )
+            isImporting = true
         } catch {
             self.error = error.localizedDescription
         }
     }
 
     func commitImport() {
-        guard let session = importSession else { return }
+        guard isImporting else { return }
+        let session = importSession
         let tag = session.tag.trimmingCharacters(in: .whitespaces).lowercased()
         for entry in session.entries where entry.include {
             let token = Token(name: entry.key, envVar: entry.key, tags: tag.isEmpty ? [] : [tag])
@@ -230,7 +235,7 @@ final class ManagerModel {
                 self.error = "\(entry.key): \(error.localizedDescription)"
             }
         }
-        importSession = nil
+        isImporting = false
         if !tag.isEmpty { category = .tag(tag) }
     }
 }
@@ -246,10 +251,10 @@ struct ManagerView: View {
         } detail: {
             DetailColumn(model: model)
         }
-        .sheet(isPresented: present(\.newDraft)) {
+        .sheet(isPresented: $model.isCreating) {
             NewTokenSheet(model: model)
         }
-        .sheet(isPresented: present(\.importSession)) {
+        .sheet(isPresented: $model.isImporting) {
             ImportSheet(model: model)
         }
         .confirmationDialog(
@@ -396,8 +401,8 @@ struct DetailColumn: View {
     var body: some View {
         Group {
             if let token = model.selectedToken {
-                if model.isEditing, let draft = Binding($model.editDraft) {
-                    TokenForm(draft: draft) {
+                if model.isEditing {
+                    TokenForm(draft: $model.editDraft) {
                         Section {
                             Button("Delete Token", role: .destructive) { model.pendingDelete = token }
                                 .frame(maxWidth: .infinity)
@@ -423,7 +428,7 @@ struct DetailColumn: View {
                         Button("Done") { model.commitEditing() }
                             .keyboardShortcut("s")
                             .buttonStyle(.borderedProminent)
-                            .disabled(model.editDraft?.canSave != true)
+                            .disabled(!model.editDraft.canSave)
                     }
                 } else {
                     ToolbarItemGroup(placement: .primaryAction) {
@@ -582,26 +587,24 @@ struct NewTokenSheet: View {
     @Bindable var model: ManagerModel
 
     var body: some View {
-        if let draft = Binding($model.newDraft) {
-            VStack(spacing: 0) {
-                Text("New Token")
-                    .font(.headline)
-                    .padding(.top, 20)
-                TokenForm(draft: draft)
-                    .scrollDisabled(true)
-                HStack {
-                    Spacer()
-                    Button("Cancel") { model.newDraft = nil }
-                        .keyboardShortcut(.cancelAction)
-                    Button("Save") { model.saveNew() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!draft.wrappedValue.canSave)
-                }
-                .controlSize(.large)
-                .padding([.horizontal, .bottom], 20)
+        VStack(spacing: 0) {
+            Text("New Token")
+                .font(.headline)
+                .padding(.top, 20)
+            TokenForm(draft: $model.newDraft)
+                .scrollDisabled(true)
+            HStack {
+                Spacer()
+                Button("Cancel") { model.isCreating = false }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") { model.saveNew() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!model.newDraft.canSave)
             }
-            .frame(width: 460, height: draft.wrappedValue.hasExpiry ? 540 : 500)
+            .controlSize(.large)
+            .padding([.horizontal, .bottom], 20)
         }
+        .frame(width: 440, height: model.newDraft.hasExpiry ? 540 : 500)
     }
 }
 
@@ -609,47 +612,45 @@ struct ImportSheet: View {
     @Bindable var model: ManagerModel
 
     var body: some View {
-        if let session = Binding($model.importSession) {
-            let count = session.wrappedValue.entries.filter(\.include).count
-            VStack(spacing: 0) {
-                VStack(spacing: 4) {
-                    Text("Import from \(session.wrappedValue.source)")
-                        .font(.headline)
-                    Text("Keys you already have are unchecked.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 20)
-                Form {
-                    Section {
-                        ForEach(session.entries) { $entry in
-                            Toggle(isOn: $entry.include) {
-                                HStack {
-                                    Text(entry.key).font(.body.monospaced())
-                                    if entry.exists {
-                                        Text("Exists").font(.caption).foregroundStyle(.orange)
-                                    }
+        let count = model.importSession.entries.filter(\.include).count
+        VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                Text("Import from \(model.importSession.source)")
+                    .font(.headline)
+                Text("Keys you already have are unchecked.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 20)
+            Form {
+                Section {
+                    ForEach($model.importSession.entries) { $entry in
+                        Toggle(isOn: $entry.include) {
+                            HStack {
+                                Text(entry.key).font(.body.monospaced())
+                                if entry.exists {
+                                    Text("Exists").font(.caption).foregroundStyle(.orange)
                                 }
                             }
                         }
                     }
-                    Section {
-                        TextField("Tag", text: session.tag, prompt: Text("Optional"))
-                    }
                 }
-                .formStyle(.grouped)
-                HStack {
-                    Spacer()
-                    Button("Cancel") { model.importSession = nil }
-                        .keyboardShortcut(.cancelAction)
-                    Button(count == 1 ? "Import 1 Token" : "Import \(count) Tokens") { model.commitImport() }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(count == 0)
+                Section {
+                    TextField("Tag", text: $model.importSession.tag, prompt: Text("Optional"))
                 }
-                .controlSize(.large)
-                .padding([.horizontal, .bottom], 20)
             }
-            .frame(width: 480, height: 460)
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Cancel") { model.isImporting = false }
+                    .keyboardShortcut(.cancelAction)
+                Button(count == 1 ? "Import 1 Token" : "Import \(count) Tokens") { model.commitImport() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(count == 0)
+            }
+            .controlSize(.large)
+            .padding([.horizontal, .bottom], 20)
         }
+        .frame(width: 460, height: 440)
     }
 }
