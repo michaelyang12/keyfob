@@ -10,7 +10,7 @@ make install   # copy to /Applications (needed for Launch at login)
 make icon      # regenerate Resources/AppIcon.icns
 ```
 
-Requires macOS 14+ and Xcode (the Makefile points `DEVELOPER_DIR` at `/Applications/Xcode.app`; Command Line Tools alone lack the SwiftUI macro plugins).
+Requires macOS 26+ and a Swift 6.2+ toolchain with the macOS 26 SDK or newer (current Command Line Tools work). The code avoids `@State` because the Command Line Tools don't include SwiftUI's macro plugins.
 
 ## Search panel
 
@@ -35,6 +35,7 @@ open "keyfob://search?q=github"
 open "keyfob://new?q=Stripe"
 open keyfob://manage
 open keyfob://settings
+open "keyfob://token?q=github"   # manager, best match selected
 ```
 
 ## Storage
