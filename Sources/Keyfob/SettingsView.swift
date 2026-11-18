@@ -1,58 +1,23 @@
 import AppKit
 import Carbon.HIToolbox
+import Observation
 import ServiceManagement
 import SwiftUI
 
-struct SettingsView: View {
-    @Bindable var prefs: Preferences
-    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var loginError: String?
+@MainActor @Observable
+final class SettingsModel {
+    let prefs: Preferences
+    let lock: SessionLock
+    var openAtLogin = SMAppService.mainApp.status == .enabled
+    var loginError: String?
+    @ObservationIgnored private var monitor: Any?
 
-    var body: some View {
-        Form {
-            Section {
-                LabeledContent("Open search panel") {
-                    HotKeyRecorder(prefs: prefs)
-                }
-                Toggle("Launch at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-                if let loginError {
-                    Text(loginError).font(.caption).foregroundStyle(.red)
-                }
-            }
-
-            Section("Security") {
-                Toggle("Require Touch ID to copy", isOn: $prefs.requireUnlock)
-                Picker("Stay unlocked", selection: $prefs.lockAfterMinutes) {
-                    Text("1 minute").tag(1)
-                    Text("5 minutes").tag(5)
-                    Text("15 minutes").tag(15)
-                    Text("1 hour").tag(60)
-                    Text("Until screen locks").tag(0)
-                }
-                .disabled(!prefs.requireUnlock)
-            }
-
-            Section {
-                Picker("Clear clipboard after", selection: $prefs.clearClipboardAfter) {
-                    Text("10 seconds").tag(10)
-                    Text("30 seconds").tag(30)
-                    Text("1 minute").tag(60)
-                    Text("2 minutes").tag(120)
-                    Text("Never").tag(0)
-                }
-            } footer: {
-                Text("Copied tokens are marked concealed so clipboard managers skip them. The clipboard is only cleared if it still holds the token.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+    init(prefs: Preferences, lock: SessionLock) {
+        self.prefs = prefs
+        self.lock = lock
     }
 
-    private func setLaunchAtLogin(_ enabled: Bool) {
+    func setOpenAtLogin(_ enabled: Bool) {
         do {
             if enabled {
                 try SMAppService.mainApp.register()
@@ -63,35 +28,30 @@ struct SettingsView: View {
         } catch {
             loginError = error.localizedDescription
         }
-    }
-}
-
-struct HotKeyRecorder: View {
-    @Bindable var prefs: Preferences
-    @State private var monitor: Any?
-
-    var body: some View {
-        Button {
-            prefs.isRecordingHotKey ? stop() : start()
-        } label: {
-            Text(prefs.isRecordingHotKey ? "Type shortcut…" : prefs.hotKey.display)
-                .font(.system(.body, design: .rounded).weight(.medium))
-                .frame(minWidth: 110)
-        }
-        .onDisappear { stop() }
+        openAtLogin = SMAppService.mainApp.status == .enabled
     }
 
-    private func start() {
+    func toggleRecording() {
+        prefs.isRecordingHotKey ? stopRecording() : startRecording()
+    }
+
+    private func startRecording() {
         prefs.isRecordingHotKey = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainActor.assumeIsolated { capture(event) }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            MainActor.assumeIsolated { self?.capture(event) }
             return nil
         }
     }
 
+    func stopRecording() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        if prefs.isRecordingHotKey { prefs.isRecordingHotKey = false }
+    }
+
     private func capture(_ event: NSEvent) {
         if Int(event.keyCode) == kVK_Escape {
-            stop()
+            stopRecording()
             return
         }
         let mods = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -100,12 +60,90 @@ struct HotKeyRecorder: View {
             return
         }
         prefs.hotKey = HotKeyCombo(keyCode: UInt32(event.keyCode), modifiers: mods.rawValue, key: HotKeyCombo.keyName(for: event))
-        stop()
+        stopRecording()
     }
+}
 
-    private func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        if prefs.isRecordingHotKey { prefs.isRecordingHotKey = false }
+struct GeneralSettingsView: View {
+    @Bindable var settings: SettingsModel
+
+    var body: some View {
+        @Bindable var prefs = settings.prefs
+        Form {
+            Section {
+                LabeledContent("Search shortcut") {
+                    Button {
+                        settings.toggleRecording()
+                    } label: {
+                        Text(settings.prefs.isRecordingHotKey ? "Press Shortcut…" : settings.prefs.hotKey.display)
+                            .monospacedDigit()
+                            .frame(minWidth: 96)
+                    }
+                    .help("Click, then press a new key combination. Press Esc to cancel.")
+                }
+                Toggle("Open at Login", isOn: Binding(
+                    get: { settings.openAtLogin },
+                    set: { settings.setOpenAtLogin($0) }
+                ))
+            } footer: {
+                if let error = settings.loginError {
+                    Text(error).foregroundStyle(.red)
+                }
+            }
+
+            Section {
+                Picker("Clear Clipboard", selection: $prefs.clearClipboardAfter) {
+                    Text("After 10 Seconds").tag(10)
+                    Text("After 30 Seconds").tag(30)
+                    Text("After 1 Minute").tag(60)
+                    Text("After 2 Minutes").tag(120)
+                    Text("Never").tag(0)
+                }
+            } footer: {
+                Text("Copied tokens are hidden from clipboard managers, and the clipboard is only cleared if it still holds the token.")
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
+        .onDisappear { settings.stopRecording() }
+    }
+}
+
+struct SecuritySettingsView: View {
+    @Bindable var settings: SettingsModel
+
+    var body: some View {
+        @Bindable var prefs = settings.prefs
+        Form {
+            Section {
+                Toggle("Require Touch ID to Copy", isOn: $prefs.requireUnlock)
+                Picker("Lock Again", selection: $prefs.lockAfterMinutes) {
+                    Text("After 1 Minute").tag(1)
+                    Text("After 5 Minutes").tag(5)
+                    Text("After 15 Minutes").tag(15)
+                    Text("After 1 Hour").tag(60)
+                    Text("When Screen Locks").tag(0)
+                }
+                .disabled(!settings.prefs.requireUnlock)
+            } footer: {
+                Text("keyfob also locks when your Mac sleeps or the screen locks.")
+            }
+
+            Section {
+                LabeledContent("Status") {
+                    Label(
+                        settings.lock.isUnlocked ? "Unlocked" : "Locked",
+                        systemImage: settings.lock.isUnlocked ? "lock.open.fill" : "lock.fill"
+                    )
+                    .foregroundStyle(settings.lock.isUnlocked ? .orange : .secondary)
+                }
+                Button("Lock Now") { settings.lock.lock() }
+                    .disabled(!settings.lock.isUnlocked)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 480)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

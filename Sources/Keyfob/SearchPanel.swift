@@ -404,11 +404,10 @@ final class CopyHUD {
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.4))
             guard !Task.isCancelled, let self else { return }
-            NSAnimationContext.runAnimationGroup { context in
+            await NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.3
                 self.panel.animator().alphaValue = 0
             }
-            try? await Task.sleep(for: .seconds(0.35))
             guard !Task.isCancelled else { return }
             self.panel.orderOut(nil)
         }

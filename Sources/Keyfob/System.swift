@@ -59,11 +59,18 @@ final class GlobalHotKey {
 final class ActionMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(_ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = .command, handler: @escaping () -> Void) {
+    init(
+        _ title: String,
+        symbol: String? = nil,
+        key: String = "",
+        modifiers: NSEvent.ModifierFlags = .command,
+        handler: @escaping () -> Void
+    ) {
         self.handler = handler
         super.init(title: title, action: #selector(fire), keyEquivalent: key)
         keyEquivalentModifierMask = modifiers
         target = self
+        if let symbol { image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil) }
     }
 
     required init(coder: NSCoder) {
