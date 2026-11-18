@@ -1,8 +1,3 @@
-XCODE_DEV := /Applications/Xcode.app/Contents/Developer
-ifneq ($(wildcard $(XCODE_DEV)),)
-export DEVELOPER_DIR := $(XCODE_DEV)
-endif
-
 APP := build/keyfob.app
 BIN := .build/release/Keyfob
 

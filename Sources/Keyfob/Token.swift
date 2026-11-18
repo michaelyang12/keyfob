@@ -48,6 +48,18 @@ struct Token: Identifiable, Hashable, Codable {
 
     enum Expiry: Equatable {
         case none, valid, soon(days: Int), expired
+
+        var label: String? {
+            switch self {
+            case .none, .valid: nil
+            case .expired: "Expired"
+            case .soon(0): "Expires today"
+            case .soon(1): "Expires tomorrow"
+            case .soon(let days): "Expires in \(days) days"
+            }
+        }
+
+        var isUrgent: Bool { label != nil }
     }
 
     func expiry(now: Date = .now) -> Expiry {
